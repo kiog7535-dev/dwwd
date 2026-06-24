@@ -1,0 +1,48 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>DWWD - Chat</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div class="app">
+    <aside class="server-dock" id="serverDock">
+      <!-- servers appended here -->
+      <button id="createServerBtn" title="Create server" class="server-btn create">+</button>
+    </aside>
+
+    <aside class="channel-panel" id="channelPanel">
+      <div class="server-header" id="serverHeader">Select a server</div>
+      <div class="channels" id="channelsList"></div>
+    </aside>
+
+    <main class="chat-area" id="chatArea">
+      <header class="chat-header" id="chatHeader">
+        <div class="channel-title" id="channelTitle">#general</div>
+        <div class="chat-actions">
+          <button id="inviteBtn">Invite</button>
+        </div>
+      </header>
+      <section class="messages" id="messages"></section>
+      <div class="typing" id="typing"></div>
+      <footer class="message-input">
+        <textarea id="messageInput" placeholder="Message #general"></textarea>
+        <button id="sendBtn">Send</button>
+      </footer>
+    </main>
+
+    <aside class="member-list" id="memberList">
+      <div class="member-header">Members</div>
+      <div id="members"></div>
+    </aside>
+  </div>
+
+  <!-- Profile popup -->
+  <div id="profilePopup" class="profile-popup hidden"></div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/client.js"></script>
+</body>
+</html>

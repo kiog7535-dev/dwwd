@@ -1,0 +1,20 @@
+{
+  "name": "dwwd-discord-like",
+  "version": "1.0.0",
+  "description": "Discord-inspired chat app using Node, Express, Socket.IO and database.json",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": ["discord-like","chat","socket.io","express"],
+  "author": "generated",
+  "license": "MIT",
+  "dependencies": {
+    "bcrypt": "^5.1.0",
+    "express": "^4.18.2",
+    "express-session": "^1.17.3",
+    "sanitize-html": "^2.11.1",
+    "socket.io": "^4.7.2",
+    "uuid": "^9.0.0"
+  }
+}
