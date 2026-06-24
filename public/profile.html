@@ -1,0 +1,36 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Profile - DWWD</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="profile-page">
+  <div id="profileRoot"></div>
+  <script>
+    async function renderProfile(){
+      const params = new URLSearchParams(window.location.search);
+      const id = params.get('id');
+      if(!id) return document.getElementById('profileRoot').textContent = 'No id';
+      const res = await fetch('/api/users/' + encodeURIComponent(id));
+      if(!res.ok) return document.getElementById('profileRoot').textContent = 'Not found';
+      const j = await res.json();
+      const u = j.user;
+      document.getElementById('profileRoot').innerHTML = `
+        <div class="profile-full">
+          <div class="profile-banner" style="background-image: url('${u.banner || ''}');"></div>
+          <div class="profile-body">
+            <div class="profile-avatar" style="background:${u.avatar ? 'transparent' : '#666'}">${u.avatar ? '<img src="'+u.avatar+'" style="width:72px;height:72px;border-radius:50%" />' : (u.displayName?u.displayName[0]:'?')}</div>
+            <h2>${u.displayName} <span class="muted">@${u.username}</span></h2>
+            <div>${u.badges && u.badges.blue?'<img src="/icons/blue-check.svg" class="badge-icon"/>':''}${u.badges && u.badges.gold?'<img src="/icons/gold-badge.svg" class="badge-icon"/>':''}${u.isAdmin?'<span class="muted"> Admin</span>':''}</div>
+            <p class="muted">${u.bio || ''}</p>
+            <div class="muted">Friends: ${u.friendCount} • Mutuals: ${u.mutualCount} • Joined: ${new Date(u.joinDate).toLocaleDateString()}</div>
+          </div>
+        </div>
+      `;
+    }
+    renderProfile();
+  </script>
+</body>
+</html>

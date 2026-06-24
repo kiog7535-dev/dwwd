@@ -1,0 +1,74 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Admin - Verification</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body class="admin-page">
+  <div class="admin-card">
+    <h2>Verification Management</h2>
+    <div>
+      <input id="searchInput" placeholder="Search username" />
+      <button id="searchBtn">Search</button>
+    </div>
+    <div id="results"></div>
+  </div>
+  <script src="/socket.io/socket.io.js"></script>
+  <script>
+    async function ensureAdmin(){
+      const res = await fetch('/api/me');
+      if (!res.ok) return window.location.href = '/';
+      const j = await res.json();
+      if (!j.user || !j.user.isAdmin) return window.location.href = '/';
+    }
+    ensureAdmin();
+    const socket = io();
+    document.getElementById('searchBtn').addEventListener('click', doSearch);
+    document.getElementById('searchInput').addEventListener('keydown', (e)=>{ if(e.key==='Enter') doSearch(); });
+
+    async function doSearch(){
+      const q = document.getElementById('searchInput').value.trim();
+      const res = await fetch('/api/admin/users?search=' + encodeURIComponent(q));
+      const j = await res.json();
+      renderResults(j.users || []);
+    }
+
+    function renderResults(users){
+      const out = document.getElementById('results');
+      out.innerHTML = '';
+      users.forEach(u => {
+        const div = document.createElement('div');
+        div.className = 'admin-user-row';
+        div.innerHTML = `<div><strong>${u.username}</strong><div class="muted">${u.id} • ${new Date(u.joinDate).toLocaleDateString()}</div></div>
+          <div class="admin-actions" data-id="${u.id}">
+            <button data-act="grant-blue">Grant Blue</button>
+            <button data-act="remove-blue">Remove Blue</button>
+            <button data-act="grant-gold">Grant Gold</button>
+            <button data-act="remove-gold">Remove Gold</button>
+            <div class="badges">${renderBadgeIcons(u.badges)}</div>
+          </div>`;
+        out.appendChild(div);
+      });
+      out.querySelectorAll('.admin-actions button').forEach(b=>b.addEventListener('click', async (e)=>{
+        const id = e.target.parentElement.dataset.id;
+        const act = e.target.dataset.act;
+        await fetch('/api/admin/users/' + id + '/' + act.replace(/-/g, '-'), { method: 'POST' });
+        doSearch();
+      }));
+    }
+
+    function renderBadgeIcons(badges){
+      if(!badges) return '';
+      let s = '';
+      if(badges.blue) s += '<img src="/icons/blue-check.svg" class="badge-icon" title="Blue verified" />';
+      if(badges.gold) s += '<img src="/icons/gold-badge.svg" class="badge-icon" title="Gold verified" />';
+      if(badges.admin) s += '<span class="muted">Admin</span>';
+      return s;
+    }
+
+    socket.on('userUpdated', (d)=>{ doSearch(); });
+  </script>
+</body>
+</html>

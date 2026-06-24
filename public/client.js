@@ -30,6 +30,7 @@ function escapeHtml(s){return String(s).replace(/[&<>"']/g, (c)=>({ '&':'&amp;',
   socket.on('dmMessage', onDMReceived);
   socket.on('typing', (d) => showTyping(d));
   socket.on('presenceUpdate', (d) => updatePresence(d));
+  socket.on('userUpdated', (d) => handleUserUpdated(d));
 })();
 
 function attachHandlers(){
@@ -48,9 +49,10 @@ function attachHandlers(){
 
 function buildServerDock(servers){
   const dock = $('#serverDock');
+  dock.querySelectorAll('.server-btn.user').forEach(n=>n.remove());
   servers.forEach(s=>{
     const b = document.createElement('button');
-    b.className = 'server-btn';
+    b.className = 'server-btn user';
     b.title = s.name;
     b.style.background = s.iconColor || '#333';
     b.dataset.serverId = s.id;
@@ -76,14 +78,23 @@ function buildChannels(channels){
   if (serverChannels[0]) selectChannel(serverChannels[0].id, serverChannels[0].name);
 }
 
+function renderBadges(badges){
+  if(!badges) return '';
+  let s = '';
+  if(badges.blue) s += '<img src="/icons/blue-check.svg" class="badge-icon" title="Blue verified" />';
+  if(badges.gold) s += '<img src="/icons/gold-badge.svg" class="badge-icon" title="Gold verified" />';
+  if(badges.admin) s += '<span class="muted">★</span>';
+  return s;
+}
+
 function populateMembers(users){
   const container = $('#members');
   container.innerHTML = '';
   users.forEach(u=>{
     const el = document.createElement('div');
     el.className = 'member';
-    el.innerHTML = `<div class="avatar" style="background:${u.avatarColor}">${escapeInitials(u.displayName || u.username)}</div><div><div>${escapeHtml(u.displayName || u.username)}</div><div class="muted" style="font-size:12px;">${u.status || 'offline'}</div></div>`;
-    el.addEventListener('click', ()=>showProfile(u.id));
+    el.innerHTML = `<div class="avatar" style="background:${u.avatarColor}">${escapeInitials(u.displayName || u.username)}</div><div><div>${escapeHtml(u.displayName || u.username)} ${renderBadges(u.badges||{})}</div><div class="muted" style="font-size:12px;">${u.status || 'offline'}</div></div>`;
+    el.addEventListener('click', ()=>{ window.location.href = '/profile.html?id=' + encodeURIComponent(u.id); });
     container.appendChild(el);
   });
 }
@@ -121,7 +132,7 @@ function renderMessages(messages){
     const el = document.createElement('div');
     el.className = 'msg';
     el.innerHTML = `<div class="avatar" style="background:${u.avatarColor}">${escapeInitials(u.displayName || u.username)}</div>
-      <div class="content"><div class="meta"><strong>${escapeHtml(u.displayName || u.username)}</strong> <span class="muted">• ${new Date(m.createdAt).toLocaleString()}</span></div>
+      <div class="content"><div class="meta"><strong>${escapeHtml(u.displayName || u.username)} ${renderBadges(u.badges||{})}</strong> <span class="muted">• ${new Date(m.createdAt).toLocaleString()}</span></div>
       <div class="text">${escapeHtml(m.content)}</div></div>`;
     container.appendChild(el);
   });
@@ -134,7 +145,7 @@ function onMessageReceived(msg){
   const el = document.createElement('div');
   el.className = 'msg';
   el.innerHTML = `<div class="avatar" style="background:${u.avatarColor}">${escapeInitials(u.displayName || u.username)}</div>
-    <div class="content"><div class="meta"><strong>${escapeHtml(u.displayName || u.username)}</strong> <span class="muted">• ${new Date(msg.createdAt).toLocaleTimeString()}</span></div>
+    <div class="content"><div class="meta"><strong>${escapeHtml(u.displayName || u.username)} ${renderBadges(u.badges||{})}</strong> <span class="muted">• ${new Date(msg.createdAt).toLocaleTimeString()}</span></div>
     <div class="text">${escapeHtml(msg.content)}</div></div>`;
   container.appendChild(el);
   container.scrollTop = container.scrollHeight;
@@ -154,10 +165,10 @@ function sendMessage(){
 }
 
 function findUser(id){
-  // crude: look in member list
-  const el = Array.from(document.querySelectorAll('.member')).find(m=>m.dataset && m.dataset.userid===id);
-  // fallback: show minimal
-  return { id, username: id, displayName: 'User', avatarColor: '#666' , status: 'online'};
+  // crude: look in member list - better to fetch from server
+  const mems = Array.from(document.querySelectorAll('#members .member'));
+  const el = mems.find(m=> m.textContent && m.textContent.includes(id));
+  return { id, username: id, displayName: id, avatarColor: '#666', badges: {} };
 }
 
 function escapeInitials(name){
@@ -168,36 +179,19 @@ function escapeInitials(name){
   return s.toUpperCase();
 }
 
-function showProfile(userId){
-  // fetch local users (simplifying: using API data)
+function handleUserUpdated(d){
+  // refetch data and re-render members/messages to reflect badge/profile changes
   fetch('/api/data').then(r=>r.json()).then(d=>{
-    const u = d.users.find(x => x.id === userId);
-    if (!u) return;
-    const popup = $('#profilePopup');
-    popup.innerHTML = `<div class="profile-banner" style="background:${u.banner || 'linear-gradient(90deg,#333,#444)'}"></div>
-      <div class="profile-body"><div class="profile-avatar" style="background:${u.avatarColor}">${escapeInitials(u.displayName||u.username)}</div>
-      <h3>${escapeHtml(u.displayName||u.username)} <span class="muted">@${escapeHtml(u.username)}</span></h3>
-      <p class="muted">${escapeHtml(u.bio || '')}</p>
-      <div class="badges">${u.badges && u.badges.admin?'<span class="button">Admin</span>':''}${u.badges && u.badges.blue?'<span class="button">Blue</span>':''}${u.badges && u.badges.gold?'<span class="button">Gold</span>':''}</div>
-      <div style="margin-top:8px;"><button class="button" id="messageBtn">Message</button> <button class="button" id="friendBtn">Add Friend</button></div></div>`;
-    popup.classList.remove('hidden');
-    $('#messageBtn').addEventListener('click', ()=>startDM(u.id));
-    $('#friendBtn').addEventListener('click', ()=>sendFriend(u.username));
+    populateMembers(d.users);
+    if (currentChannel) {
+      const msgs = d.messages.filter(m => m.channelId === currentChannel);
+      renderMessages(msgs);
+    }
   });
 }
 
-function startDM(userId){
-  const msg = prompt('Open DM and send initial message (optional)');
-  if (!msg) return;
-  fetch('/api/sendDM', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ toId: userId, content: msg })});
-  alert('DM sent!');
-}
-
-function sendFriend(username){
-  fetch('/api/friendRequest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ to: username })}).then(r=>r.json()).then(j=>{
-    if (j.ok) alert('Friend request sent');
-    else alert(j.error || 'failed');
-  });
+function showProfile(userId){
+  window.location.href = '/profile.html?id=' + encodeURIComponent(userId);
 }
 
 function showTyping(d){
