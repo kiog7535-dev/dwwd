@@ -1,10 +1,11 @@
-// Client-side logic. Connects UI + Socket.IO and basic interactions.
+// Client-side logic with UI polish: grouping messages, improved profile popup, server tooltips.
 
 const socket = io();
 let currentChannel = null;
 let currentServer = null;
 let me = null;
 const socketToken = localStorage.getItem('socketToken');
+let usersMap = {};
 
 function $(s){return document.querySelector(s);} 
 function escapeHtml(s){return String(s).replace(/[&<>"']/g, (c)=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));}
@@ -16,9 +17,21 @@ function escapeHtml(s){return String(s).replace(/[&<>"']/g, (c)=>({ '&':'&amp;',
   if (!meRes.ok) return window.location.href = '/login.html';
   const j = await meRes.json();
   me = j.user;
+
+  // add admin button if admin
+  if (me.isAdmin) {
+    const btn = document.createElement('button');
+    btn.className = 'admin-btn';
+    btn.textContent = 'Verification';
+    btn.addEventListener('click', ()=> window.open('/admin.html', '_blank'));
+    document.querySelector('.chat-actions').prepend(btn);
+  }
+
   // fetch all data
   const dataRes = await fetch('/api/data');
   const data = await dataRes.json();
+  // build users map
+  data.users.forEach(u => usersMap[u.id] = u);
   buildServerDock(data.servers);
   buildChannels(data.channels);
   populateMembers(data.users);
@@ -56,6 +69,10 @@ function buildServerDock(servers){
     b.title = s.name;
     b.style.background = s.iconColor || '#333';
     b.dataset.serverId = s.id;
+    const inner = document.createElement('div'); inner.className = 'inner'; inner.textContent = s.name[0] || 'S';
+    b.appendChild(inner);
+    // tooltip
+    const tip = document.createElement('div'); tip.className = 'tooltip'; tip.textContent = s.name; b.appendChild(tip);
     b.addEventListener('click', ()=>selectServer(s.id));
     dock.insertBefore(b, $('#createServerBtn'));
   });
@@ -70,7 +87,7 @@ function buildChannels(channels){
   serverChannels.forEach(c=>{
     const el = document.createElement('div');
     el.className = 'channel';
-    el.textContent = c.name || '#channel';
+    el.innerHTML = `<span class="hash">#</span><span class="name">${escapeHtml(c.name.replace(/^#/,''))}</span>`;
     el.dataset.channelId = c.id;
     el.addEventListener('click', ()=>selectChannel(c.id, c.name));
     container.appendChild(el);
@@ -93,8 +110,9 @@ function populateMembers(users){
   users.forEach(u=>{
     const el = document.createElement('div');
     el.className = 'member';
-    el.innerHTML = `<div class="avatar" style="background:${u.avatarColor}">${escapeInitials(u.displayName || u.username)}</div><div><div>${escapeHtml(u.displayName || u.username)} ${renderBadges(u.badges||{})}</div><div class="muted" style="font-size:12px;">${u.status || 'offline'}</div></div>`;
-    el.addEventListener('click', ()=>{ window.location.href = '/profile.html?id=' + encodeURIComponent(u.id); });
+    el.dataset.userid = u.id;
+    el.innerHTML = `<div class="avatar" style="background:${u.avatarColor}">${escapeInitials(u.displayName || u.username)}</div><div><div class="username">${escapeHtml(u.displayName || u.username)} ${renderBadges(u.badges||{})}</div><div class="muted">${u.status || 'offline'}</div></div>`;
+    el.addEventListener('click', ()=>{ showProfilePopup(u.id, el); });
     container.appendChild(el);
   });
 }
@@ -105,6 +123,8 @@ function selectServer(serverId){
   document.querySelectorAll('.server-btn').forEach(b => b.classList.toggle('active', b.dataset.serverId === serverId));
   // get channels for that server by refetching data
   fetch('/api/data').then(r=>r.json()).then(d=>{
+    // update users map
+    d.users.forEach(u => usersMap[u.id] = u);
     buildChannels(d.channels);
     populateMembers(d.users);
   });
@@ -115,40 +135,53 @@ function selectChannel(channelId, name){
   document.querySelectorAll('.channel').forEach(c=>c.classList.toggle('active', c.dataset.channelId === channelId));
   $('#channelTitle').textContent = name;
   $('#messageInput').placeholder = `Message ${name}`;
-  // subscribe socket room handled server-side on auth; load messages via /api/data
+  // load messages via /api/data
   fetch('/api/data').then(r=>r.json()).then(d=>{
+    // update users map
+    d.users.forEach(u => usersMap[u.id] = u);
     const msgs = d.messages.filter(m => m.channelId === channelId);
-    renderMessages(msgs);
+    renderMessagesGrouped(msgs);
     // scroll
     setTimeout(()=> $('#messages').scrollTop = $('#messages').scrollHeight, 50);
   });
 }
 
-function renderMessages(messages){
+function renderMessagesGrouped(messages){
   const container = $('#messages');
   container.innerHTML = '';
+  let prevAuthor = null;
+  let groupEl = null;
   messages.forEach(m => {
-    const u = findUser(m.from);
-    const el = document.createElement('div');
-    el.className = 'msg';
-    el.innerHTML = `<div class="avatar" style="background:${u.avatarColor}">${escapeInitials(u.displayName || u.username)}</div>
-      <div class="content"><div class="meta"><strong>${escapeHtml(u.displayName || u.username)} ${renderBadges(u.badges||{})}</strong> <span class="muted">• ${new Date(m.createdAt).toLocaleString()}</span></div>
-      <div class="text">${escapeHtml(m.content)}</div></div>`;
-    container.appendChild(el);
+    const u = usersMap[m.from] || { displayName: m.from, avatarColor: '#666', badges: {} };
+    if (m.from !== prevAuthor) {
+      // start a new group
+      groupEl = document.createElement('div');
+      groupEl.className = 'msg-group';
+      const avatar = document.createElement('div'); avatar.className = 'avatar'; avatar.style.background = u.avatarColor; avatar.textContent = escapeInitials(u.displayName || u.username);
+      const bubble = document.createElement('div'); bubble.className = 'msg-bubble';
+      const meta = document.createElement('div'); meta.className = 'msg-meta'; meta.innerHTML = `<strong>${escapeHtml(u.displayName || u.username)}</strong> ${renderBadges(u.badges||{})} <span class="muted">• ${new Date(m.createdAt).toLocaleTimeString()}</span>`;
+      const text = document.createElement('div'); text.className = 'msg-text'; text.innerHTML = escapeHtml(m.content);
+      bubble.appendChild(meta); bubble.appendChild(text);
+      groupEl.appendChild(avatar); groupEl.appendChild(bubble);
+      container.appendChild(groupEl);
+    } else {
+      // continuation
+      const cont = document.createElement('div'); cont.className = 'msg-continuation'; cont.innerHTML = `<div class="msg-bubble">${escapeHtml(m.content)}</div>`;
+      container.appendChild(cont);
+    }
+    prevAuthor = m.from;
   });
 }
 
 function onMessageReceived(msg){
   if (msg.channelId !== currentChannel) return;
-  const container = $('#messages');
-  const u = findUser(msg.from);
-  const el = document.createElement('div');
-  el.className = 'msg';
-  el.innerHTML = `<div class="avatar" style="background:${u.avatarColor}">${escapeInitials(u.displayName || u.username)}</div>
-    <div class="content"><div class="meta"><strong>${escapeHtml(u.displayName || u.username)} ${renderBadges(u.badges||{})}</strong> <span class="muted">• ${new Date(msg.createdAt).toLocaleTimeString()}</span></div>
-    <div class="text">${escapeHtml(msg.content)}</div></div>`;
-  container.appendChild(el);
-  container.scrollTop = container.scrollHeight;
+  // append message and group if same author
+  fetch('/api/data').then(r=>r.json()).then(d=>{
+    d.users.forEach(u => usersMap[u.id] = u);
+    const msgs = d.messages.filter(m => m.channelId === currentChannel);
+    renderMessagesGrouped(msgs);
+    setTimeout(()=> $('#messages').scrollTop = $('#messages').scrollHeight, 20);
+  });
 }
 
 function onDMReceived(d){
@@ -164,13 +197,6 @@ function sendMessage(){
   input.value = '';
 }
 
-function findUser(id){
-  // crude: look in member list - better to fetch from server
-  const mems = Array.from(document.querySelectorAll('#members .member'));
-  const el = mems.find(m=> m.textContent && m.textContent.includes(id));
-  return { id, username: id, displayName: id, avatarColor: '#666', badges: {} };
-}
-
 function escapeInitials(name){
   if (!name) return '?';
   const parts = name.split(' ');
@@ -179,19 +205,65 @@ function escapeInitials(name){
   return s.toUpperCase();
 }
 
-function handleUserUpdated(d){
-  // refetch data and re-render members/messages to reflect badge/profile changes
-  fetch('/api/data').then(r=>r.json()).then(d=>{
-    populateMembers(d.users);
-    if (currentChannel) {
-      const msgs = d.messages.filter(m => m.channelId === currentChannel);
-      renderMessages(msgs);
-    }
+// Profile popup (inline)
+let profilePopupEl = null;
+function ensureProfilePopup(){
+  if (!profilePopupEl) {
+    profilePopupEl = document.createElement('div');
+    profilePopupEl.className = 'profile-popup hidden';
+    document.body.appendChild(profilePopupEl);
+  }
+}
+
+async function showProfilePopup(userId, anchorEl){
+  ensureProfilePopup();
+  const res = await fetch('/api/users/' + encodeURIComponent(userId));
+  if (!res.ok) return;
+  const j = await res.json();
+  const u = j.user;
+  profilePopupEl.innerHTML = `<div class="profile-banner" style="background-image: url('${u.banner || ''}'); height:80px;border-radius:8px 8px 0 0;background-size:cover"></div>
+    <div class="profile-body"><div class="profile-avatar" style="width:64px;height:64px;border-radius:50%;margin-top:-32px;border:3px solid rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;background:${u.avatar?'transparent':'#666'}">${u.avatar?`<img src='${u.avatar}' style='width:64px;height:64px;border-radius:50%'/>`:(u.displayName?u.displayName[0]:'?')}</div>
+    <h3>${escapeHtml(u.displayName)} <span class="muted">@${escapeHtml(u.username)}</span></h3>
+    <div>${u.badges && u.badges.blue?'<img src="/icons/blue-check.svg" class="badge-icon"/>':''}${u.badges && u.badges.gold?'<img src="/icons/gold-badge.svg" class="badge-icon"/>':''}${u.isAdmin?'<span class="muted"> Admin</span>':''}</div>
+    <p class="muted">${escapeHtml(u.bio || '')}</p>
+    <div class="muted">Friends: ${u.friendCount || 0} • Mutuals: ${u.mutualCount || 0} • Joined: ${new Date(u.joinDate).toLocaleDateString()}</div>
+    <div style="margin-top:8px;"><button class="button" id="msgBtn">Message</button> <button class="button" id="friendBtn">Add Friend</button> <a class="button" href="/profile.html?id=${encodeURIComponent(u.id)}">View Profile</a></div>
+    </div>`;
+  profilePopupEl.classList.remove('hidden');
+  // position near anchor
+  const rect = anchorEl.getBoundingClientRect();
+  profilePopupEl.style.position = 'fixed';
+  profilePopupEl.style.left = (rect.right + 12) + 'px';
+  profilePopupEl.style.top = (rect.top) + 'px';
+
+  $('#msgBtn').addEventListener('click', ()=>{ startDM(u.id); profilePopupEl.classList.add('hidden'); });
+  $('#friendBtn').addEventListener('click', ()=>{ sendFriend(u.username); profilePopupEl.classList.add('hidden'); });
+}
+
+function startDM(userId){
+  const msg = prompt('Open DM and send initial message (optional)');
+  if (!msg) return;
+  fetch('/api/sendDM', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ toId: userId, content: msg })});
+  alert('DM sent!');
+}
+
+function sendFriend(username){
+  fetch('/api/friendRequest', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ to: username })}).then(r=>r.json()).then(j=>{
+    if (j.ok) alert('Friend request sent');
+    else alert(j.error || 'failed');
   });
 }
 
-function showProfile(userId){
-  window.location.href = '/profile.html?id=' + encodeURIComponent(userId);
+function handleUserUpdated(d){
+  // refetch users list minimally
+  fetch('/api/data').then(r=>r.json()).then(d=>{
+    d.users.forEach(u=> usersMap[u.id] = u);
+    populateMembers(d.users);
+    if (currentChannel) {
+      const msgs = d.messages.filter(m => m.channelId === currentChannel);
+      renderMessagesGrouped(msgs);
+    }
+  });
 }
 
 function showTyping(d){
